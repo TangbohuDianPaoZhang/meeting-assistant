@@ -23,7 +23,7 @@ function extractTopics(text: string): string[] {
   return [...new Set(raw)].slice(0, 3);
 }
 
-function inferDueDate(text: string): string | null {
+export function inferDueDate(text: string): string | null {
   const m = text.match(/(\d{4}-\d{2}-\d{2})/);
   if (m?.[1]) return `${m[1]}T17:00:00.000Z`;
 
@@ -127,7 +127,6 @@ export async function updateSummaryWithLlmOrFallback(
     `decisions: ${(meeting.summary.decisions ?? []).join(" | ") || "none"}`,
     `nextActions: ${(meeting.summary.nextActions ?? []).join(" | ") || "none"}`,
     `risks: ${(meeting.summary.risks ?? []).join(" | ") || "none"}`,
-    `summaryText: ${meeting.summary.summaryText ?? "none"}`,
   ].join("\n");
 
   // Use full history (caller decides), but cap tokens by truncating oldest lines.
@@ -145,13 +144,12 @@ export async function updateSummaryWithLlmOrFallback(
 
   return {
     summary: {
-      summaryText: llm.summaryText,
       topics: llm.topics.slice(0, 10),
       decisions: llm.decisions.slice(0, 10),
       risks: llm.risks.slice(0, 10),
       nextActions: llm.nextActions.slice(0, 15),
       updatedAt: new Date().toISOString(),
     },
-    actionItems: llm.actionItems.slice(0, 12),
+    actionItems: null,
   };
 }
