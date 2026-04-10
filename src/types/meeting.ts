@@ -16,6 +16,7 @@ export interface TranscriptSegment {
   endMs: number;
   isFinal: boolean;
   createdAt: string;
+  translatedText?: string;
 }
 
 export interface ActionItem {
@@ -40,7 +41,6 @@ export interface SentimentMoment {
 }
 
 export interface MeetingSummary {
-  summaryText?: string;
   topics: string[];
   decisions: string[];
   risks: string[];
