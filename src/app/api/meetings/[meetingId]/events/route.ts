@@ -11,11 +11,16 @@ export async function POST(
   try {
     const { meetingId } = await params;
     const body = await request.json();
-    const { speakerName, text, language, isFinal } = body;
+    const { speakerName, text, language, isFinal, translatedText } = body;  // ✅ 添加 translatedText
     
-    console.log('[Events API] 收到请求:', { meetingId, speakerName, text: text?.substring(0, 50) });
+    console.log('[Events API] 收到请求:', { 
+      meetingId, 
+      speakerName, 
+      text: text?.substring(0, 50),
+      hasTranslation: !!translatedText  // ✅ 日志
+    });
     
-    // 🔥 关键：如果会议不存在，自动创建
+    // 如果会议不存在，自动创建
     let meeting = meetingsStore.get(meetingId);
     if (!meeting) {
       console.log('[Events API] 会议不存在，自动创建:', meetingId);
@@ -32,7 +37,7 @@ export async function POST(
       meetingsStore.set(meetingId, meeting);
     }
     
-    // 添加转录记录
+    // 添加转录记录（包含译文）
     const newSegment = {
       id: Date.now().toString(),
       meetingId,
@@ -40,7 +45,7 @@ export async function POST(
       speakerId: speakerName,
       text,
       language,
-      translatedText: language === 'zh' ? text : '',
+      translatedText: translatedText || '',  // ✅ 存储译文
       startMs: 0,
       endMs: 0,
       isFinal: true,

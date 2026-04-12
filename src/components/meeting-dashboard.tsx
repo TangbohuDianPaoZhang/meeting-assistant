@@ -30,11 +30,35 @@ async function createMeeting(title: string) {
   return data.meeting;
 }
 
-async function postSegment(meetingId: string, speakerName: string, text: string, language: string) {
+// ✅ 新增：翻译函数
+async function translateText(text: string, targetLang: string = 'zh'): Promise<string | null> {
+  if (!text || text.trim().length === 0) return null;
+  
+  // 检测是否已经是中文（如果目标是中文且原文已经是中文）
+  const chineseRegex = /[\u4e00-\u9fa5]/;
+  if (targetLang === 'zh' && chineseRegex.test(text)) {
+    return text; // 中文原文直接返回
+  }
+  
+  try {
+    const response = await fetch('/api/llm/translate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, targetLang })
+    });
+    const data = await response.json();
+    return data.translation || null;
+  } catch (error) {
+    console.error('[翻译] 失败:', error);
+    return null;
+  }
+}
+
+async function postSegment(meetingId: string, speakerName: string, text: string, language: string, translatedText?: string) {
   const res = await fetch(`/api/meetings/${meetingId}/events`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ speakerName, text, language, isFinal: true }),
+    body: JSON.stringify({ speakerName, text, language, isFinal: true, translatedText }),
   });
 
   if (!res.ok) {
@@ -71,6 +95,7 @@ export function MeetingDashboard() {
   const [mounted, setMounted] = useState(false);
   const [interimText, setInterimText] = useState("");
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
+  const [enableTranslation, setEnableTranslation] = useState(true); // ✅ 新增：翻译开关
 
   useEffect(() => {
     setMounted(true);
@@ -114,7 +139,14 @@ export function MeetingDashboard() {
     setError(null);
     setIsSubmitting(true);
     try {
-      const updatedMeeting = await postSegment(meeting.id, speakerName, text.trim(), language);
+      // ✅ 如果需要翻译，先翻译
+      let translatedText = '';
+      if (enableTranslation && language === 'en') {
+        const translation = await translateText(text.trim(), 'zh');
+        translatedText = translation || '';
+      }
+      
+      const updatedMeeting = await postSegment(meeting.id, speakerName, text.trim(), language, translatedText);
       setMeeting(updatedMeeting);
       setText("");
 
@@ -132,7 +164,7 @@ export function MeetingDashboard() {
     }
   }
 
-  // 生成并更新摘要的函数 - 同时更新 summary 和 actions
+  // 生成并更新摘要的函数
   const generateAndUpdateSummary = async (transcriptTexts: string[]) => {
     if (isGeneratingSummary) return;
     
@@ -172,11 +204,10 @@ export function MeetingDashboard() {
           const uniqueNewActions = newActions.filter(a => !existingDescriptions.has(a.description));
           const allActions = [...prev.actions, ...uniqueNewActions];
           
-          console.log('[LLM] 更新 actions:', allActions.length, '条');
-          
           return {
             ...prev,
             summary: {
+              summaryText: result.summaryText,
               topics: result.topics || [],
               decisions: result.decisions || [],
               nextActions: result.nextActions || [],
@@ -194,7 +225,7 @@ export function MeetingDashboard() {
     }
   };
 
-  // 处理语音转录回调 - 确保会议存在
+  // ✅ 核心修改：处理语音转录回调，自动翻译
   const handleVoiceTranscript = async (speakerName: string, text: string) => {
     console.log('[UI] 收到语音转录:', { speakerName, text });
     
@@ -216,6 +247,26 @@ export function MeetingDashboard() {
     
     setInterimText("");
     
+    // ✅ 如果需要翻译，调用翻译 API
+    let translatedText = '';
+    if (enableTranslation) {
+      // 检测语言：如果原文包含中文，不需要翻译；否则翻译成中文
+      const hasChinese = /[\u4e00-\u9fa5]/.test(text);
+      if (!hasChinese) {
+        console.log('[UI] 开始翻译:', text.substring(0, 50));
+        try {
+          const translation = await translateText(text, 'zh');
+          translatedText = translation || '';
+          console.log('[UI] 翻译结果:', translatedText);
+        } catch (e) {
+          console.error('[UI] 翻译失败:', e);
+        }
+      } else {
+        translatedText = text; // 中文原文
+      }
+    }
+    
+    // 先更新 UI（乐观更新）
     const newSegment = {
       id: `temp_${Date.now()}_${Math.random()}`,
       meetingId: currentMeeting.id,
@@ -223,18 +274,12 @@ export function MeetingDashboard() {
       speakerId: 'unknown',
       text: text,
       language: language,
-      translatedText: language === 'zh' ? text : '',
+      translatedText: translatedText,
       startMs: 0,
       endMs: 0,
       isFinal: true,
       createdAt: new Date().toISOString()
     };
-    
-    const currentTranscripts = currentMeeting?.transcript || [];
-    const allTranscriptTexts = [
-      ...currentTranscripts.map(seg => `${seg.speakerName}: ${seg.text}`),
-      `${speakerName}: ${text}`
-    ];
     
     setMeeting(prev => {
       if (!prev) return prev;
@@ -245,7 +290,8 @@ export function MeetingDashboard() {
     });
     
     try {
-      const updatedMeeting = await postSegment(currentMeeting.id, speakerName, text, language);
+      // 保存到后端（带上译文）
+      const updatedMeeting = await postSegment(currentMeeting.id, speakerName, text, language, translatedText);
       console.log('[UI] 后端保存成功', updatedMeeting);
       setMeeting(updatedMeeting);
 
@@ -258,6 +304,7 @@ export function MeetingDashboard() {
     } catch (e) {
       console.error('[UI] 保存失败:', e);
       setError(e instanceof Error ? e.message : "语音提交失败");
+      // 回滚 UI
       setMeeting(prev => {
         if (!prev) return prev;
         return {
@@ -328,6 +375,21 @@ export function MeetingDashboard() {
                 <Input value={speakerName} onChange={(e) => setSpeakerName(e.target.value)} placeholder="发言人" />
                 <Input value={language} onChange={(e) => setLanguage(e.target.value)} placeholder="语言代码，例如 zh/en" />
               </div>
+              
+              {/* ✅ 新增：翻译开关 */}
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="enableTranslation"
+                  checked={enableTranslation}
+                  onChange={(e) => setEnableTranslation(e.target.checked)}
+                  className="rounded border-gray-300"
+                />
+                <label htmlFor="enableTranslation" className="text-sm text-muted-foreground">
+                  启用自动翻译（英译中）
+                </label>
+              </div>
+              
               <Textarea
                 value={text}
                 onChange={(e) => setText(e.target.value)}
@@ -408,6 +470,12 @@ export function MeetingDashboard() {
                           <span>{new Date(seg.createdAt).toLocaleTimeString()}</span>
                         </div>
                         <p className="text-sm leading-6">{seg.text}</p>
+                        {/* ✅ 如果有译文且与原文不同，显示译文 */}
+                        {seg.translatedText && seg.translatedText !== seg.text && (
+                          <p className="text-sm leading-6 text-sky-600 mt-1 border-t pt-1">
+                            📝 {seg.translatedText}
+                          </p>
+                        )}
                       </div>
                     ))}
                     {meeting?.transcript.length === 0 && !interimText && (
@@ -420,6 +488,13 @@ export function MeetingDashboard() {
               </TabsContent>
 
               <TabsContent value="summary" className="mt-4 grid gap-4 md:grid-cols-2">
+                {/* ✅ 新增：一段话总结显示 */}
+                {meeting?.summary.summaryText && (
+                  <div className="rounded-lg border p-3 md:col-span-2 bg-sky-50">
+                    <h3 className="mb-2 text-sm font-semibold">会议摘要</h3>
+                    <p className="text-sm">{meeting.summary.summaryText}</p>
+                  </div>
+                )}
                 <div className="rounded-lg border p-3">
                   <h3 className="mb-2 text-sm font-semibold">关键主题</h3>
                   <div className="flex flex-wrap gap-2">
@@ -492,7 +567,7 @@ export function MeetingDashboard() {
                   <div className="mb-3 flex items-center justify-between">
                     <h3 className="text-sm font-semibold">双语对照视图</h3>
                     <Badge variant="outline" className="text-xs">
-                      自动翻译 {meeting?.transcript.length || 0} 条
+                      自动翻译 {meeting?.transcript.filter(seg => seg.translatedText).length || 0} 条
                     </Badge>
                   </div>
                   <div className="space-y-3 max-h-96 overflow-auto">
@@ -505,19 +580,19 @@ export function MeetingDashboard() {
                             <span>{seg.text}</span>
                           </p>
                         </div>
-                        {seg.translatedText ? (
-                          <div className="border-t pt-2">
-                            <span className="text-xs font-medium text-muted-foreground">译文</span>
-                            <p className="text-sm text-muted-foreground">{seg.translatedText}</p>
-                          </div>
-                        ) : (
-                          <div className="border-t pt-2">
-                            <span className="text-xs font-medium text-muted-foreground">译文</span>
-                            <p className="text-sm italic text-muted-foreground/60">
-                              {seg.language === 'zh' ? '（中文原文）' : '翻译中...'}
-                            </p>
-                          </div>
-                        )}
+                        {/* ✅ 显示译文 */}
+                        <div className="border-t pt-2">
+                          <span className="text-xs font-medium text-muted-foreground">译文</span>
+                          <p className="text-sm text-sky-600">
+                            {seg.translatedText ? (
+                              seg.translatedText
+                            ) : (
+                              <span className="italic text-muted-foreground/60">
+                                {seg.language === 'zh' ? '（中文原文）' : '翻译中...'}
+                              </span>
+                            )}
+                          </p>
+                        </div>
                       </div>
                     ))}
                     {meeting?.transcript.length === 0 && (

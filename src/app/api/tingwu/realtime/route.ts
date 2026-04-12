@@ -47,7 +47,7 @@ export async function POST() {
         Transcription: {
           DiarizationEnabled: true,   // 开启说话人分离
           Diarization: {
-            SpeakerCount: 0            // 2人对话，0表示自动识别
+            SpeakerCount: 2            // 2人对话，0表示自动识别
           }
         }
       }

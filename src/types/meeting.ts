@@ -65,4 +65,5 @@ export interface IngestEventInput {
   text: string;
   language?: string;
   isFinal?: boolean;
+  translatedText?: string; 
 }
