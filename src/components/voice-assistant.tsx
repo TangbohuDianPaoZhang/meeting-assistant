@@ -17,7 +17,6 @@ const speakerNameMap: Record<string, string> = {
   speaker_1: '参会者A',
   speaker_2: '参会者B',
   speaker_3: '参会者C',
-  speaker_4: '参会者D',
   unknown: '发言人',
 };
 
@@ -111,7 +110,7 @@ export function VoiceAssistant({ meetingId, onTranscriptReceived, onInterimUpdat
     if (success) {
       setIsRecording(true);
     } else {
-      setError('启动录音失败，请检查麦克风权限和听悟配置');
+      setError('启动录音失败，请检查麦克风权限和讯飞配置');
     }
   };
 
